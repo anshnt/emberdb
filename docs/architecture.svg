@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 560" width="860" height="560" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <rect width="860" height="560" rx="10" fill="#0d1117"/>
+
+  <text x="34" y="44" fill="#ff8c42" font-size="17" font-weight="600">emberdb</text>
+  <text x="152" y="44" fill="#6e7a88" font-size="13">every layer knows only the one below it</text>
+
+  <!-- SQL -->
+  <rect x="34" y="70" width="590" height="72" rx="7" fill="#161b22" stroke="#30363d"/>
+  <text x="54" y="97" fill="#c9d1d9" font-size="14" font-weight="600">SQL</text>
+  <text x="54" y="120" fill="#8b949e" font-size="12">hand-written lexer · recursive-descent parser · evaluator · index-aware planner</text>
+  <text x="604" y="97" fill="#484f58" font-size="11" text-anchor="end">internal/sql · internal/exec</text>
+
+  <!-- store -->
+  <rect x="34" y="160" width="590" height="72" rx="7" fill="#161b22" stroke="#30363d"/>
+  <text x="54" y="187" fill="#c9d1d9" font-size="14" font-weight="600">store</text>
+  <text x="54" y="210" fill="#8b949e" font-size="12">catalog · row versions · snapshot isolation · single-column indexes</text>
+  <text x="604" y="187" fill="#484f58" font-size="11" text-anchor="end">internal/store</text>
+
+  <!-- btree -->
+  <rect x="34" y="250" width="590" height="72" rx="7" fill="#161b22" stroke="#30363d"/>
+  <text x="54" y="277" fill="#c9d1d9" font-size="14" font-weight="600">btree</text>
+  <text x="54" y="300" fill="#8b949e" font-size="12">ordered map · splits and merges · linked leaves · overflow chains</text>
+  <text x="604" y="277" fill="#484f58" font-size="11" text-anchor="end">internal/btree</text>
+
+  <!-- pager and wal -->
+  <rect x="34" y="340" width="286" height="82" rx="7" fill="#161b22" stroke="#30363d"/>
+  <text x="54" y="367" fill="#c9d1d9" font-size="14" font-weight="600">pager</text>
+  <text x="300" y="367" fill="#484f58" font-size="11" text-anchor="end">internal/pager</text>
+  <text x="54" y="390" fill="#8b949e" font-size="12">4 KiB pages · two-tier cache</text>
+  <text x="54" y="408" fill="#8b949e" font-size="12">free list · double-buffered header</text>
+
+  <rect x="338" y="340" width="286" height="82" rx="7" fill="#161b22" stroke="#30363d"/>
+  <text x="358" y="367" fill="#c9d1d9" font-size="14" font-weight="600">wal</text>
+  <text x="604" y="367" fill="#484f58" font-size="11" text-anchor="end">internal/wal</text>
+  <text x="358" y="390" fill="#8b949e" font-size="12">redo log of page images</text>
+  <text x="358" y="408" fill="#8b949e" font-size="12">group commit · replay · checkpoint</text>
+
+  <!-- file -->
+  <rect x="34" y="440" width="590" height="56" rx="7" fill="#12161c" stroke="#21262d"/>
+  <text x="54" y="474" fill="#6e7a88" font-size="13">one file on disk, plus a transient log while the database is open</text>
+
+  <!-- arrows -->
+  <g stroke="#30363d" stroke-width="1.5" fill="none">
+    <path d="M329 142 L329 160"/>
+    <path d="M329 232 L329 250"/>
+    <path d="M329 322 L329 340"/>
+    <path d="M177 422 L177 440"/>
+    <path d="M481 422 L481 440"/>
+    <path d="M320 381 L338 381"/>
+  </g>
+
+  <!-- value, beside everything -->
+  <rect x="654" y="160" width="172" height="162" rx="7" fill="#12161c" stroke="#21262d"/>
+  <text x="674" y="187" fill="#c9d1d9" font-size="14" font-weight="600">value</text>
+  <text x="674" y="212" fill="#8b949e" font-size="12">five storage</text>
+  <text x="674" y="230" fill="#8b949e" font-size="12">classes</text>
+  <text x="674" y="258" fill="#8b949e" font-size="12">compact row</text>
+  <text x="674" y="276" fill="#8b949e" font-size="12">encoding</text>
+  <text x="674" y="300" fill="#ff8c42" font-size="12">order-preserving</text>
+  <text x="674" y="316" fill="#ff8c42" font-size="12">index keys</text>
+  <path d="M624 241 L654 241" stroke="#30363d" stroke-width="1.5" fill="none" stroke-dasharray="3 3"/>
+
+  <!-- the durability rule -->
+  <rect x="654" y="340" width="172" height="82" rx="7" fill="#1b1206" stroke="#5a3a12"/>
+  <text x="674" y="366" fill="#ff8c42" font-size="12" font-weight="600">the ordering rule</text>
+  <text x="674" y="388" fill="#c9d1d9" font-size="11">every page reaches</text>
+  <text x="674" y="404" fill="#c9d1d9" font-size="11">the log, and the log</text>
+  <text x="674" y="418" fill="#c9d1d9" font-size="11">is fsynced, first</text>
+
+  <text x="34" y="530" fill="#484f58" font-size="11">Readers and writers never block each other: superseded page images stay in memory while an older transaction needs them.</text>
+</svg>

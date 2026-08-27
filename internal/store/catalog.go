@@ -224,6 +224,9 @@ func (d *decoder) string() string {
 	return s
 }
 
+// EqualNames compares two SQL identifiers, which are case-insensitive.
+func EqualNames(a, b string) bool { return equalFold(a, b) }
+
 // equalFold compares identifiers case-insensitively, which is how SQL names
 // behave.
 func equalFold(a, b string) bool {

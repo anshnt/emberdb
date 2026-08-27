@@ -5,9 +5,11 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
 
-## [0.1.0] - 2026-08-27
+Nothing yet.
+
+## 0.1.0 - 2026-08-27
 
 The first release. Everything below is new.
 
@@ -44,6 +46,3 @@ The first release. Everything below is new.
   usability after each one.
 - **Benchmarks** against SQLite in a separate module, so the comparison does not
   put a third-party dependency into the engine.
-
-[Unreleased]: https://github.com/anshnt/emberdb/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/anshnt/emberdb/releases/tag/v0.1.0

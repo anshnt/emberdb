@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,6 +32,7 @@ func (tx *Tx) Table(name string) (*Table, error) {
 		return nil, err
 	}
 	tx.tables[key] = t
+	tx.loaded[key] = encoded
 	return t, nil
 }
 
@@ -84,9 +86,13 @@ func (tx *Tx) markDirty(t *Table) {
 	tx.schemaChanged = true
 }
 
-// flushTables writes every cached table definition back to the catalog. Doing
-// it once at commit keeps a million-row insert from rewriting the catalog a
-// million times just to advance a row-id counter.
+// flushTables writes every cached table definition whose contents actually
+// changed back to the catalog.
+//
+// Doing it once at commit keeps a million-row insert from rewriting the
+// catalog a million times just to advance a row-id counter. Comparing against
+// what was read keeps a transaction that only updated or deleted rows from
+// logging the catalog page at all, since nothing in the definition moved.
 func (tx *Tx) flushTables() error {
 	if !tx.schemaChanged {
 		return nil
@@ -101,11 +107,16 @@ func (tx *Tx) flushTables() error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		root, err := btree.Put(w, tx.catalog, []byte(name), encodeTable(tx.tables[name]))
+		encoded := encodeTable(tx.tables[name])
+		if previous, ok := tx.loaded[name]; ok && bytes.Equal(previous, encoded) {
+			continue
+		}
+		root, err := btree.Put(w, tx.catalog, []byte(name), encoded)
 		if err != nil {
 			return err
 		}
 		tx.catalog = root
+		tx.loaded[name] = encoded
 	}
 	return nil
 }

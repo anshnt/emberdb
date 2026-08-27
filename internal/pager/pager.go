@@ -163,6 +163,16 @@ func (p *Pager) Path() string { return p.path }
 // Read returns the current image of page id. The returned slice aliases the
 // page cache and must not be modified; use a Batch to change a page.
 func (p *Pager) Read(id PageID) ([]byte, error) {
+	return p.ReadAt(id, ^uint64(0))
+}
+
+// ReadAt returns the image of page id as a snapshot bounded by upper sees it:
+// the newest image installed by a transaction at or below upper.
+//
+// This is what lets a scan run while a writer commits. The reader keeps
+// walking the tree it started on, rather than half of it and half of the one
+// the writer has rearranged.
+func (p *Pager) ReadAt(id PageID, upper uint64) ([]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
@@ -171,16 +181,29 @@ func (p *Pager) Read(id PageID) ([]byte, error) {
 	if uint32(id) >= p.hdr.state.PageCount {
 		return nil, fmt.Errorf("%w: page %d of %d", ErrPageOutOfRange, id, p.hdr.state.PageCount)
 	}
-	return p.readLocked(id)
+	chain, err := p.chainLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	return chain.at(upper), nil
 }
 
-// readLocked loads a page from the cache, falling back to the file. A page
-// past the physical end of the file reads as zeros: a crash can leave the file
-// short of the page count recorded in a header the log is about to redo, and
-// the redo will overwrite it.
+// readLocked returns the newest image of a page.
 func (p *Pager) readLocked(id PageID) ([]byte, error) {
-	if data, ok := p.cache.get(id); ok {
-		return data, nil
+	chain, err := p.chainLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	return chain.image, nil
+}
+
+// chainLocked loads a page's version chain from the cache, falling back to the
+// file. A page past the physical end of the file reads as zeros: a crash can
+// leave the file short of the page count recorded in a header the log is about
+// to redo, and the redo will overwrite it.
+func (p *Pager) chainLocked(id PageID) (*pageVersion, error) {
+	if chain, ok := p.cache.chain(id); ok {
+		return chain, nil
 	}
 	data := make([]byte, PageSize)
 	if _, err := p.file.ReadAt(data, int64(id)*PageSize); err != nil {
@@ -188,8 +211,12 @@ func (p *Pager) readLocked(id PageID) ([]byte, error) {
 			return nil, fmt.Errorf("emberdb: read page %d: %w", id, err)
 		}
 	}
-	p.cache.put(id, data)
-	return data, nil
+	// A page read back from the file predates every transaction the cache
+	// still tracks: anything newer would have been pinned, and a pinned
+	// page is never evicted.
+	chain := &pageVersion{image: data}
+	p.cache.put(id, chain)
+	return chain, nil
 }
 
 // CachedPages reports how many pages the cache currently holds in either tier.
@@ -219,7 +246,11 @@ func (p *Pager) PendingPages() int {
 // Commit takes ownership of the batch's page images; the batch must not be
 // used afterwards. The caller must have made those images durable in the log
 // first.
-func (p *Pager) Commit(b *Batch) error {
+//
+// txID stamps the new images so that ReadAt can tell which snapshots they
+// belong to. When retain is set, the images they replace are kept in memory
+// for transactions that began earlier and are still running.
+func (p *Pager) Commit(b *Batch, txID uint64, retain bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
@@ -230,10 +261,29 @@ func (p *Pager) Commit(b *Batch) error {
 		if len(data) != PageSize {
 			return fmt.Errorf("emberdb: page %d image is %d bytes, want %d", id, len(data), PageSize)
 		}
-		p.cache.pin(id, data)
+		if retain {
+			// Make sure the image being replaced is in memory before it
+			// is superseded; once a checkpoint runs, the file will hold
+			// the new one and the old one is unrecoverable.
+			if _, err := p.chainLocked(id); err != nil && !errors.Is(err, ErrPageOutOfRange) {
+				return err
+			}
+		}
+		p.cache.pin(id, data, txID, retain)
 	}
 	p.hdr.state = b.state
 	return nil
+}
+
+// PruneVersions releases superseded page images that no snapshot at or above
+// oldest can still reach.
+func (p *Pager) PruneVersions(oldest uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	p.cache.pruneVersions(oldest)
 }
 
 // ApplyRecovered installs a page image replayed from the write-ahead log. Like
@@ -250,7 +300,7 @@ func (p *Pager) ApplyRecovered(id PageID, data []byte) error {
 	}
 	image := make([]byte, PageSize)
 	copy(image, data)
-	p.cache.pin(id, image)
+	p.cache.pin(id, image, 0, false)
 	return nil
 }
 
@@ -280,8 +330,8 @@ func (p *Pager) Checkpoint(lsn uint64) error {
 
 func (p *Pager) checkpointLocked(lsn uint64) error {
 	for _, id := range p.cache.pinnedIDs() {
-		data := p.cache.pinned[id]
-		if _, err := p.file.WriteAt(data, int64(id)*PageSize); err != nil {
+		image := p.cache.pinned[id].image
+		if _, err := p.file.WriteAt(image, int64(id)*PageSize); err != nil {
 			return fmt.Errorf("emberdb: write page %d: %w", id, err)
 		}
 	}

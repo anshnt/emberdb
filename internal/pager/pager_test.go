@@ -27,7 +27,7 @@ func commit(t *testing.T, p *Pager, lsn uint64, fn func(b *Batch) error) {
 	if err := fn(b); err != nil {
 		t.Fatalf("batch: %v", err)
 	}
-	if err := p.Commit(b); err != nil {
+	if err := p.Commit(b, lsn, false); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if err := p.Checkpoint(lsn); err != nil {
@@ -265,7 +265,7 @@ func TestCacheEvictsLeastRecentlyUsed(t *testing.T) {
 		t.Fatalf("Read(5): %v", err)
 	}
 	p.mu.Lock()
-	_, stillCached := p.cache.get(1)
+	_, stillCached := p.cache.chain(1)
 	p.mu.Unlock()
 	if stillCached {
 		t.Fatal("page 1 should have been evicted as least recently used")
@@ -328,7 +328,7 @@ func TestCommitLeavesTheFileUntouchedUntilCheckpoint(t *testing.T) {
 		t.Fatalf("Alloc: %v", err)
 	}
 	copy(page, "durable-later")
-	if err := p.Commit(b); err != nil {
+	if err := p.Commit(b, 1, false); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -375,7 +375,7 @@ func TestPinnedPagesAreNeverEvicted(t *testing.T) {
 		}
 		binary.LittleEndian.PutUint32(page, uint32(id)*7)
 	}
-	if err := p.Commit(b); err != nil {
+	if err := p.Commit(b, 1, false); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if got := p.PendingPages(); got != pages {
@@ -389,5 +389,98 @@ func TestPinnedPagesAreNeverEvicted(t *testing.T) {
 		if got := binary.LittleEndian.Uint32(data); got != uint32(id)*7 {
 			t.Fatalf("page %d reads %d, want %d", id, got, uint32(id)*7)
 		}
+	}
+}
+
+func TestReadAtSeesThePageAsOfASnapshot(t *testing.T) {
+	p, _ := newPager(t, Options{})
+	commit(t, p, 1, func(b *Batch) error {
+		_, page, err := b.Alloc()
+		if err != nil {
+			return err
+		}
+		copy(page, "first")
+		return nil
+	})
+
+	// Transaction 5 replaces the page while a snapshot bounded at 4 is
+	// still reading.
+	b := p.Begin()
+	page, err := b.Writable(1)
+	if err != nil {
+		t.Fatalf("Writable: %v", err)
+	}
+	copy(page, "second")
+	if err := p.Commit(b, 5, true); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	older, err := p.ReadAt(1, 4)
+	if err != nil {
+		t.Fatalf("ReadAt: %v", err)
+	}
+	if string(older[:5]) != "first" {
+		t.Fatalf("snapshot at 4 reads %q, want the image it began with", older[:6])
+	}
+	newer, err := p.ReadAt(1, 5)
+	if err != nil {
+		t.Fatalf("ReadAt: %v", err)
+	}
+	if string(newer[:6]) != "second" {
+		t.Fatalf("snapshot at 5 reads %q, want the committed image", newer[:6])
+	}
+
+	// Once the old snapshot is gone the superseded image is released and
+	// every reader converges on the current one.
+	p.PruneVersions(5)
+	released, err := p.ReadAt(1, 4)
+	if err != nil {
+		t.Fatalf("ReadAt: %v", err)
+	}
+	if string(released[:6]) != "second" {
+		t.Fatalf("after pruning, page reads %q", released[:6])
+	}
+}
+
+func TestVersionedPagesSurviveCacheEviction(t *testing.T) {
+	p, _ := newPager(t, Options{CacheSize: 2})
+	commit(t, p, 1, func(b *Batch) error {
+		for i := 0; i < 8; i++ {
+			id, page, err := b.Alloc()
+			if err != nil {
+				return err
+			}
+			binary.LittleEndian.PutUint32(page, uint32(id))
+		}
+		return nil
+	})
+	b := p.Begin()
+	for id := PageID(1); id <= 8; id++ {
+		page, err := b.Writable(id)
+		if err != nil {
+			t.Fatalf("Writable(%d): %v", id, err)
+		}
+		binary.LittleEndian.PutUint32(page, uint32(id)+1000)
+	}
+	if err := p.Commit(b, 9, true); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if err := p.Checkpoint(2); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	// The cache holds two pages, but eight of them owe an older image to an
+	// open snapshot and so cannot be evicted.
+	for id := PageID(1); id <= 8; id++ {
+		data, err := p.ReadAt(id, 8)
+		if err != nil {
+			t.Fatalf("ReadAt(%d): %v", id, err)
+		}
+		if got := binary.LittleEndian.Uint32(data); got != uint32(id) {
+			t.Fatalf("page %d at the old snapshot reads %d, want %d", id, got, id)
+		}
+	}
+	p.PruneVersions(9)
+	if got := p.CachedPages(); got > 2 {
+		t.Fatalf("after pruning the cache still holds %d pages, capacity is 2", got)
 	}
 }

@@ -72,7 +72,7 @@ func (h *harness) get(key string) (string, bool) {
 // against pages that have been through the pager.
 func (h *harness) commit() {
 	h.t.Helper()
-	if err := h.pager.Commit(h.batch); err != nil {
+	if err := h.pager.Commit(h.batch, h.lsn+1, false); err != nil {
 		h.t.Fatalf("Commit: %v", err)
 	}
 	h.lsn++

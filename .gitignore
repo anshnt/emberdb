@@ -1,0 +1,22 @@
+# Compiled binaries
+/ember
+/bin/
+*.exe
+*.test
+
+# Test and coverage output
+coverage.out
+coverage.html
+*.prof
+
+# Local database files
+*.ember
+*.ember-wal
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

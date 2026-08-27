@@ -57,6 +57,24 @@ jobs:
       - name: go test
         run: go test -race -count=1 ./...
 
+  bench:
+    name: benchmarks build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # The benchmarks are a separate module and are far too slow to run on
+      # every push, but they still have to keep compiling against the engine.
+      - name: vet the benchmark module
+        working-directory: bench
+        run: |
+          go build ./...
+          go vet ./...
+          go test -run . -bench . -benchtime 1x -count 1 ./...
+
   crash:
     name: crash injection
     runs-on: ubuntu-latest

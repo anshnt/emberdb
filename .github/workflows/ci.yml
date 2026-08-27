@@ -56,3 +56,20 @@ jobs:
           cache: true
       - name: go test
         run: go test -race -count=1 ./...
+
+  crash:
+    name: crash injection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # The suite runs a reduced number of crash points as part of the normal
+      # test job. This one runs the full 200, which takes minutes rather than
+      # seconds, so it gets a job of its own.
+      - name: kill and recover 200 times
+        run: go test -count=1 -timeout 20m -v -run TestCrashRecovery ./internal/crash/
+        env:
+          EMBER_CRASH_ITERS: 200

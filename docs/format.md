@@ -4,6 +4,8 @@ Version 1. Everything below is little-endian unless a field says otherwise;
 the exceptions are the row and index keys, which are big-endian so that byte
 order matches numeric order.
 
+![the header page's two slots, a B+tree node's header, slot directory and cells, and a log record's framing](page-layout.svg)
+
 A database is one file of 4 KiB pages. While it is open, a second file sits
 beside it — the write-ahead log, named by appending `-wal` to the database
 path. A clean shutdown checkpoints and removes it, so a database at rest is a

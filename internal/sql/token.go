@@ -56,6 +56,8 @@ type Token struct {
 	Lexeme string
 	// Value is the value a literal carries.
 	Value value.Value
+	// Offset is the byte offset the token starts at in the query.
+	Offset int
 	// Line is the one-based line the token starts on.
 	Line int
 	// Column is the one-based column the token starts at.

@@ -16,6 +16,10 @@ type Error struct {
 	Column int
 	// Query is the statement text, kept so that Detail can quote the line.
 	Query string
+	// Unterminated marks an error caused by input that simply stops early,
+	// such as an unclosed string. A REPL reads that as "keep typing"
+	// rather than as a mistake.
+	Unterminated bool
 }
 
 // Error implements the error interface.

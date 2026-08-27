@@ -333,3 +333,74 @@ func TestErrorPositionsAdvanceAcrossLines(t *testing.T) {
 func sameType(a, b any) bool {
 	return a != nil && b != nil && reflect.TypeOf(a) == reflect.TypeOf(b)
 }
+
+func TestComplete(t *testing.T) {
+	cases := map[string]bool{
+		"":                      false,
+		"   \n\t ":              false,
+		"SELECT 1":              false,
+		"SELECT 1;":             true,
+		"SELECT 1;\n":           true,
+		"SELECT 'a;b'":          false,
+		"SELECT 'a;b';":         true,
+		"SELECT 'unterminated;": false,
+		`SELECT "unterminated;`: false,
+		"SELECT x'AA;":          false,
+		"SELECT 1; SELECT 2":    false,
+		"SELECT 1; SELECT 2;":   true,
+		"-- just a comment":     true,
+		"SELECT 1 -- trailing;": false,
+		"SELECT 1; -- trailing": true,
+		"SELECT # ":             true,
+	}
+	for input, want := range cases {
+		if got := Complete(input); got != want {
+			t.Errorf("Complete(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
+func TestSplit(t *testing.T) {
+	cases := []struct {
+		script string
+		want   []string
+	}{
+		{"", nil},
+		{"  \n -- comment\n", nil},
+		{"SELECT 1;", []string{"SELECT 1;"}},
+		{"SELECT 1", []string{"SELECT 1"}},
+		{"SELECT 1; SELECT 2;", []string{"SELECT 1;", " SELECT 2;"}},
+		{"SELECT 1;;SELECT 2", []string{"SELECT 1;", "SELECT 2"}},
+		{"SELECT 'a;b'; SELECT 2;", []string{"SELECT 'a;b';", " SELECT 2;"}},
+		{"SELECT 1 -- ;\n;", []string{"SELECT 1 -- ;\n;"}},
+	}
+	for _, c := range cases {
+		got, err := Split(c.script)
+		if err != nil {
+			t.Errorf("Split(%q): %v", c.script, err)
+			continue
+		}
+		if len(got) != len(c.want) {
+			t.Errorf("Split(%q) = %q, want %q", c.script, got, c.want)
+			continue
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Errorf("Split(%q)[%d] = %q, want %q", c.script, i, got[i], c.want[i])
+			}
+		}
+	}
+	// Every piece must parse on its own, which is the point of splitting.
+	pieces, err := Split("CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1); SELECT * FROM t")
+	if err != nil {
+		t.Fatalf("Split: %v", err)
+	}
+	for _, piece := range pieces {
+		if _, err := ParseOne(piece); err != nil {
+			t.Errorf("ParseOne(%q): %v", piece, err)
+		}
+	}
+	if _, err := Split("SELECT 'unterminated"); err == nil {
+		t.Error("Split of an unterminated literal succeeded")
+	}
+}

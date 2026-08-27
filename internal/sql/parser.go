@@ -530,3 +530,67 @@ func (p *parser) deleteStatement() (Statement, *Error) {
 	}
 	return statement, nil
 }
+
+// Complete reports whether input holds a statement a REPL should run, rather
+// than one the user is still typing.
+//
+// It is true once the input ends in a semicolon that is not inside a string or
+// a comment, and false while a literal is still open. Input that is neither is
+// treated as complete so that a plain mistake is reported rather than silently
+// swallowing the next line.
+func Complete(input string) bool {
+	if strings.TrimSpace(input) == "" {
+		return false
+	}
+	l := newLexer(input)
+	last := Token{Kind: KindEOF}
+	for {
+		tok, err := l.next()
+		if err != nil {
+			return !err.Unterminated
+		}
+		if tok.Kind == KindEOF {
+			// Input that lexes to nothing at all, such as a lone
+			// comment, has nothing left to finish.
+			return last.Kind == KindEOF || last.is(KindSymbol, ";")
+		}
+		last = tok
+	}
+}
+
+// Split divides a script into the source text of each statement it holds,
+// keeping the original spelling so that a caller can report or time
+// statements one at a time.
+//
+// Trailing text with no semicolon is returned as a final statement, which is
+// what makes a REPL line without one still run.
+func Split(script string) ([]string, error) {
+	l := newLexer(script)
+	var (
+		out       []string
+		start     int
+		hasTokens bool
+	)
+	for {
+		tok, err := l.next()
+		if err != nil {
+			return nil, err
+		}
+		if tok.Kind == KindEOF {
+			if hasTokens {
+				out = append(out, script[start:])
+			}
+			return out, nil
+		}
+		if tok.is(KindSymbol, ";") {
+			end := tok.Offset + 1
+			if hasTokens {
+				out = append(out, script[start:end])
+			}
+			start = end
+			hasTokens = false
+			continue
+		}
+		hasTokens = true
+	}
+}

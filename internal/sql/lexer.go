@@ -69,7 +69,7 @@ func (l *lexer) next() (Token, *Error) {
 
 // mark returns a token stamped with the current position.
 func (l *lexer) mark() Token {
-	return Token{Kind: KindEOF, Line: l.line, Column: l.column}
+	return Token{Kind: KindEOF, Offset: l.offset, Line: l.line, Column: l.column}
 }
 
 // advance moves forward n bytes, keeping the line and column current.
@@ -146,7 +146,7 @@ func (l *lexer) lexQuotedIdent(start Token) (Token, *Error) {
 	var b strings.Builder
 	for {
 		if l.offset >= len(l.query) {
-			return start, &Error{Message: "unterminated quoted name", Line: start.Line, Column: start.Column, Query: l.query}
+			return start, &Error{Message: "unterminated quoted name", Line: start.Line, Column: start.Column, Query: l.query, Unterminated: true}
 		}
 		if l.query[l.offset] == '"' {
 			if l.peekAt(1) == '"' {
@@ -169,7 +169,7 @@ func (l *lexer) lexString(start Token) (Token, *Error) {
 	var b strings.Builder
 	for {
 		if l.offset >= len(l.query) {
-			return start, &Error{Message: "unterminated string literal", Line: start.Line, Column: start.Column, Query: l.query}
+			return start, &Error{Message: "unterminated string literal", Line: start.Line, Column: start.Column, Query: l.query, Unterminated: true}
 		}
 		if l.query[l.offset] == '\'' {
 			if l.peekAt(1) == '\'' {
@@ -194,7 +194,7 @@ func (l *lexer) lexBlob(start Token) (Token, *Error) {
 		l.advance(1)
 	}
 	if l.offset >= len(l.query) {
-		return start, &Error{Message: "unterminated blob literal", Line: start.Line, Column: start.Column, Query: l.query}
+		return start, &Error{Message: "unterminated blob literal", Line: start.Line, Column: start.Column, Query: l.query, Unterminated: true}
 	}
 	digits := l.query[begin:l.offset]
 	l.advance(1)

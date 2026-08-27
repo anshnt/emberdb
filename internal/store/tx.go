@@ -52,7 +52,11 @@ type Tx struct {
 	// tables caches the definitions this transaction has touched, so that a
 	// bumped row-id counter or a new index is written back to the catalog
 	// once, at commit, rather than on every row.
-	tables        map[string]*Table
+	tables map[string]*Table
+	// loaded holds each cached table's encoding as it was read, so that
+	// commit can tell a definition that really changed from one that was
+	// merely touched.
+	loaded        map[string][]byte
 	schemaChanged bool
 	done          bool
 }
@@ -77,6 +81,7 @@ func (db *DB) Begin(writable bool) (*Tx, error) {
 		snapshot: Snapshot{Upper: db.committed},
 		catalog:  db.catalogRoot,
 		tables:   make(map[string]*Table),
+		loaded:   make(map[string][]byte),
 	}
 	if writable {
 		tx.id = db.nextTxID

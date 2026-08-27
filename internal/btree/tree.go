@@ -153,13 +153,22 @@ func Put(w WriteStore, root pager.PageID, key, value []byte) (pager.PageID, erro
 
 // putInto inserts into the subtree rooted at id, reporting a split back to the
 // caller so the parent can absorb it.
+//
+// The descent is read-only. An internal node is only modified when the child
+// below it splits, and taking a writable copy of every node on the way down
+// would put the whole root-to-leaf path into the transaction, and therefore
+// into the log, on every insert.
 func putInto(w WriteStore, id pager.PageID, key, value []byte) (split, error) {
-	n, err := writeNode(w, id)
+	n, err := readNode(w, id)
 	if err != nil {
 		return split{}, err
 	}
 	if n.isLeaf() {
-		return putIntoLeaf(w, n, key, value)
+		leaf, err := writeNode(w, id)
+		if err != nil {
+			return split{}, err
+		}
+		return putIntoLeaf(w, leaf, key, value)
 	}
 	ci, err := n.childIndex(key)
 	if err != nil {
@@ -173,9 +182,14 @@ func putInto(w WriteStore, id pager.PageID, key, value []byte) (split, error) {
 	if err != nil || !sp.happened {
 		return split{}, err
 	}
-	// n is still valid: an insert below only ever writes to the subtree it
-	// descended into and to the leaf sibling chain, never to an ancestor.
-	return absorbSplit(w, n, ci, child, sp)
+	// Only now does this node change. An insert below writes to the subtree
+	// it descended into and to the leaf sibling chain, never to an
+	// ancestor, so re-reading it here is safe.
+	parent, err := writeNode(w, id)
+	if err != nil {
+		return split{}, err
+	}
+	return absorbSplit(w, parent, ci, child, sp)
 }
 
 // absorbSplit records a child's split in its parent, splitting the parent in

@@ -25,6 +25,11 @@ type cache struct {
 	pinned   map[PageID]*pageVersion
 	entries  map[PageID]*list.Element
 	order    *list.List // front is most recently used
+	// versioned counts the pages currently holding a superseded image. It
+	// exists so that pruning, which runs at the end of every transaction,
+	// costs nothing at all in the common case where no reader ever
+	// overlapped a writer.
+	versioned int
 }
 
 // cacheEntry is the value stored in each list element.
@@ -146,12 +151,28 @@ func (c *cache) evict() {
 
 // pruneVersions drops superseded images no snapshot at or above oldest needs,
 // then reclaims the space that frees up.
+//
+// It returns immediately when no page holds a superseded image, which is the
+// usual case: only a commit that overlapped an older transaction creates one.
+// Without that check this would walk the whole cache at the end of every
+// transaction, which shows up as real time in a read-only workload.
 func (c *cache) pruneVersions(oldest uint64) {
+	if c.versioned == 0 {
+		return
+	}
+	c.versioned = 0
 	for _, v := range c.pinned {
 		v.prune(oldest)
+		if v.versioned() {
+			c.versioned++
+		}
 	}
 	for el := c.order.Front(); el != nil; el = el.Next() {
-		el.Value.(*cacheEntry).chain.prune(oldest)
+		chain := el.Value.(*cacheEntry).chain
+		chain.prune(oldest)
+		if chain.versioned() {
+			c.versioned++
+		}
 	}
 	c.evict()
 }
@@ -162,6 +183,9 @@ func (c *cache) remove(id PageID) {
 	el, ok := c.entries[id]
 	if !ok {
 		return
+	}
+	if el.Value.(*cacheEntry).chain.versioned() {
+		c.versioned--
 	}
 	c.order.Remove(el)
 	delete(c.entries, id)
@@ -178,7 +202,13 @@ func (c *cache) pin(id PageID, image []byte, since uint64, retain bool) {
 			version.older = previous
 		}
 	}
+	if previous, ok := c.pinned[id]; ok && previous.versioned() {
+		c.versioned--
+	}
 	c.remove(id)
+	if version.versioned() {
+		c.versioned++
+	}
 	c.pinned[id] = version
 }
 

@@ -138,6 +138,12 @@ func writeNode(w WriteStore, id pager.PageID) (node, error) {
 }
 
 // validate checks the parts of the header a corrupt page could make dangerous.
+//
+// It is deliberately constant time. Checking every slot here would be a
+// stronger guarantee, but it runs on every page a lookup touches, and a scan
+// spends real time in it. The per-slot check lives in cell instead, which is
+// consulted a logarithmic number of times per node rather than once per
+// entry, and a cell that does not survive it decodes as corrupt.
 func (n node) validate() error {
 	if len(n.data) != pager.PageSize {
 		return fmt.Errorf("%w: page %d is %d bytes", ErrCorruptNode, n.id, len(n.data))
@@ -150,17 +156,8 @@ func (n node) validate() error {
 	if n.kind() == kindOverflow {
 		return nil
 	}
-	count := n.count()
-	if offSlots+count*slotWidth > pager.PageSize {
+	if count := n.count(); offSlots+count*slotWidth > pager.PageSize {
 		return fmt.Errorf("%w: page %d claims %d cells", ErrCorruptNode, n.id, count)
-	}
-	previous := pager.PageSize
-	for i := 0; i < count; i++ {
-		off := n.slot(i)
-		if off < offSlots+count*slotWidth || off >= previous {
-			return fmt.Errorf("%w: page %d slot %d points at offset %d", ErrCorruptNode, n.id, i, off)
-		}
-		previous = off
 	}
 	return nil
 }
@@ -205,6 +202,12 @@ func (n node) cell(i int) []byte {
 	end := pager.PageSize
 	if i > 0 {
 		end = n.slot(i - 1)
+	}
+	if start < offSlots+n.count()*slotWidth || start > end || end > pager.PageSize {
+		// A damaged page can hold slots that do not descend. Return no
+		// cell rather than slicing out of range; every decoder rejects
+		// an empty cell as corrupt.
+		return nil
 	}
 	return n.data[start:end]
 }

@@ -1,6 +1,7 @@
 package btree
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -500,5 +501,81 @@ func TestReverseScanFollowsPreviousPointers(t *testing.T) {
 	}
 	if count != n {
 		t.Fatalf("backward scan returned %d entries, want %d", count, n)
+	}
+}
+
+// TestCorruptPagesAreReportedNotPanicked damages pages the way a failing disk
+// would and checks the tree reports it. validate is constant time, so most of
+// this has to be caught when a cell is decoded rather than when a page is
+// read, and the point of the test is that it still is.
+func TestCorruptPagesAreReportedNotPanicked(t *testing.T) {
+	damage := map[string]func(page []byte){
+		"unknown node kind": func(page []byte) {
+			page[0] = 99
+		},
+		"impossible cell count": func(page []byte) {
+			binary.LittleEndian.PutUint16(page[2:], 60000)
+		},
+		"slot pointing past the page": func(page []byte) {
+			binary.LittleEndian.PutUint16(page[nodeHeaderSize:], 65535)
+		},
+		"slot pointing into the header": func(page []byte) {
+			binary.LittleEndian.PutUint16(page[nodeHeaderSize:], 1)
+		},
+		"slots out of order": func(page []byte) {
+			first := binary.LittleEndian.Uint16(page[nodeHeaderSize:])
+			binary.LittleEndian.PutUint16(page[nodeHeaderSize+2:], first-1)
+			binary.LittleEndian.PutUint16(page[nodeHeaderSize:], first-1)
+		},
+		"cell length beyond its extent": func(page []byte) {
+			offset := binary.LittleEndian.Uint16(page[nodeHeaderSize:])
+			page[offset+1] = 0x7f // a key length far larger than the cell
+		},
+	}
+	for name, corrupt := range damage {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			for i := 0; i < 400; i++ {
+				h.put(key(i), fmt.Sprintf("value-%d", i))
+			}
+			// Damage the leaf the scan will reach first.
+			c, err := First(h.batch, h.root)
+			if err != nil {
+				t.Fatalf("First: %v", err)
+			}
+			page, err := h.batch.Writable(c.leaf.id)
+			if err != nil {
+				t.Fatalf("Writable: %v", err)
+			}
+			corrupt(page)
+
+			// Whatever the damage, the tree must report an error or
+			// simply not find things. It must never panic and never
+			// read outside the page.
+			failures := 0
+			if _, _, err := Get(h.batch, h.root, []byte(key(0))); err != nil {
+				failures++
+			}
+			cursor, err := First(h.batch, h.root)
+			if err != nil {
+				failures++
+			} else {
+				for cursor.Next() {
+					_, _ = cursor.Value()
+				}
+				if cursor.Err() != nil {
+					failures++
+				}
+			}
+			if _, err := Put(h.batch, h.root, []byte(key(0)), []byte("x")); err != nil {
+				failures++
+			}
+			if _, _, err := Delete(h.batch, h.root, []byte(key(0))); err != nil {
+				failures++
+			}
+			if failures == 0 {
+				t.Fatalf("damaged page went entirely unnoticed")
+			}
+		})
 	}
 }

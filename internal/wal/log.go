@@ -348,6 +348,7 @@ func newOffsetWriter(file *os.File, off int64) *offsetWriter {
 	return &offsetWriter{file: file, off: off}
 }
 
+// Write appends p at the writer's offset and advances it.
 func (w *offsetWriter) Write(p []byte) (int, error) {
 	n, err := w.file.WriteAt(p, w.off)
 	w.off += int64(n)

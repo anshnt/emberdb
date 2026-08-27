@@ -81,6 +81,7 @@ type VersionError struct {
 	Expected uint16
 }
 
+// Error implements the error interface.
 func (e *VersionError) Error() string {
 	return fmt.Sprintf("emberdb: file format version %d, this build understands version %d", e.Found, e.Expected)
 }

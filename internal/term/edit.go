@@ -35,6 +35,7 @@ type line struct {
 	cursor int
 }
 
+// String returns the text being edited.
 func (l *line) String() string { return string(l.runes) }
 
 func (l *line) insert(r rune) {

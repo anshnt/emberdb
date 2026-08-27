@@ -1,0 +1,48 @@
+name: Bug report
+description: Something behaves differently from how it is documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful bug report for a database is one that reproduces. A failing
+        test is ideal; the SQL and the order you ran it in is nearly as good.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >
+        The statements in order, or a Go test. If you hit this through the crash
+        suite, include the seed the failing iteration printed; it reproduces that
+        iteration exactly.
+      render: sql
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: emberdb version
+      description: The output of `ember -version`, or the commit you built from.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Go version and platform
+      description: For example, go1.26 on macOS 15 arm64.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        For a corruption or recovery problem, `.stats` output and whether a
+        `-wal` file was present when you reopened the database both help.

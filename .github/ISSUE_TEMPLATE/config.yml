@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How emberdb works
+    url: https://github.com/anshnt/emberdb/blob/main/ARCHITECTURE.md
+    about: A walk through the layers, from the pager up to SQL.
+  - name: The file format
+    url: https://github.com/anshnt/emberdb/blob/main/docs/format.md
+    about: Byte-offset tables for everything on disk.
+  - name: Design decisions
+    url: https://github.com/anshnt/emberdb/blob/main/docs/decisions.md
+    about: Why things are the way they are, and what is deliberately missing.

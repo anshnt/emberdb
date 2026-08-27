@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest something emberdb should be able to do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `docs/decisions.md` lists what is deliberately not implemented and why.
+        If your idea is on that list, say what changed your mind rather than
+        starting from scratch — several of them are real pieces of work.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The problem, rather than the solution you have in mind for it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like emberdb to do
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: How you work around it today, and why that is not enough.

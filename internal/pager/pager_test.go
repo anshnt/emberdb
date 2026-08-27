@@ -319,3 +319,75 @@ func TestMetaRoundTrips(t *testing.T) {
 		t.Fatalf("LSN = %d, want 7", got)
 	}
 }
+
+func TestCommitLeavesTheFileUntouchedUntilCheckpoint(t *testing.T) {
+	p, path := newPager(t, Options{})
+	b := p.Begin()
+	id, page, err := b.Alloc()
+	if err != nil {
+		t.Fatalf("Alloc: %v", err)
+	}
+	copy(page, "durable-later")
+	if err := p.Commit(b); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Size() != PageSize {
+		t.Fatalf("file grew to %d bytes before checkpoint, want %d", info.Size(), PageSize)
+	}
+	if got := p.PendingPages(); got != 1 {
+		t.Fatalf("PendingPages = %d, want 1", got)
+	}
+	// The committed page is still readable: it is pinned in the cache.
+	data, err := p.Read(id)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if string(data[:13]) != "durable-later" {
+		t.Fatalf("committed page reads %q", data[:13])
+	}
+	if err := p.Checkpoint(9); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if got := p.PendingPages(); got != 0 {
+		t.Fatalf("PendingPages after checkpoint = %d, want 0", got)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Size() != 2*PageSize {
+		t.Fatalf("file size after checkpoint = %d, want %d", info.Size(), 2*PageSize)
+	}
+}
+
+func TestPinnedPagesAreNeverEvicted(t *testing.T) {
+	p, _ := newPager(t, Options{CacheSize: 2})
+	b := p.Begin()
+	const pages = 32
+	for i := 0; i < pages; i++ {
+		id, page, err := b.Alloc()
+		if err != nil {
+			t.Fatalf("Alloc: %v", err)
+		}
+		binary.LittleEndian.PutUint32(page, uint32(id)*7)
+	}
+	if err := p.Commit(b); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := p.PendingPages(); got != pages {
+		t.Fatalf("PendingPages = %d, want %d: committed pages must outlive the LRU bound", got, pages)
+	}
+	for id := PageID(1); id <= pages; id++ {
+		data, err := p.Read(id)
+		if err != nil {
+			t.Fatalf("Read(%d): %v", id, err)
+		}
+		if got := binary.LittleEndian.Uint32(data); got != uint32(id)*7 {
+			t.Fatalf("page %d reads %d, want %d", id, got, uint32(id)*7)
+		}
+	}
+}

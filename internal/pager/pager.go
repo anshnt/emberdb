@@ -192,20 +192,33 @@ func (p *Pager) readLocked(id PageID) ([]byte, error) {
 	return data, nil
 }
 
-// CachedPages reports how many pages the cache currently holds. It exists for
-// tests and for the CLI's diagnostics.
+// CachedPages reports how many pages the cache currently holds in either tier.
 func (p *Pager) CachedPages() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cache.len()
 }
 
+// PendingPages reports how many committed pages are waiting for a checkpoint
+// to write them through to the database file.
+func (p *Pager) PendingPages() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cache.pinnedLen()
+}
+
 // Commit installs a batch's pages as the current database contents and adopts
-// its allocator state. It writes the pages to the file but does not make them
-// durable; durability is the write-ahead log's job until Checkpoint runs.
+// its allocator state.
 //
-// The caller must have made the batch's page images durable in the log before
-// calling Commit.
+// Nothing reaches the database file here. The pages are pinned in the cache,
+// where readers find them, and stay there until a checkpoint writes them
+// through. Until then the log is the only durable copy, which is what lets
+// recovery treat the file as a consistent snapshot of the last checkpoint
+// rather than a half-updated mixture.
+//
+// Commit takes ownership of the batch's page images; the batch must not be
+// used afterwards. The caller must have made those images durable in the log
+// first.
 func (p *Pager) Commit(b *Batch) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -214,38 +227,31 @@ func (p *Pager) Commit(b *Batch) error {
 	}
 	for _, id := range b.dirtyIDs() {
 		data := b.pages[id]
-		if err := p.writePageLocked(id, data); err != nil {
-			return err
+		if len(data) != PageSize {
+			return fmt.Errorf("emberdb: page %d image is %d bytes, want %d", id, len(data), PageSize)
 		}
+		p.cache.pin(id, data)
 	}
 	p.hdr.state = b.state
 	return nil
 }
 
-// writePageLocked writes one page image through to the file and the cache.
-func (p *Pager) writePageLocked(id PageID, data []byte) error {
-	if len(data) != PageSize {
-		return fmt.Errorf("emberdb: page %d image is %d bytes, want %d", id, len(data), PageSize)
-	}
-	if _, err := p.file.WriteAt(data, int64(id)*PageSize); err != nil {
-		return fmt.Errorf("emberdb: write page %d: %w", id, err)
-	}
-	p.cache.put(id, data)
-	return nil
-}
-
-// ApplyRecovered writes a page image replayed from the write-ahead log. It
-// bypasses the page-count bound because recovery can legitimately restore
-// pages the stale header does not yet know about.
+// ApplyRecovered installs a page image replayed from the write-ahead log. Like
+// Commit it pins the page, so the checkpoint that follows recovery writes it
+// through to the file.
 func (p *Pager) ApplyRecovered(id PageID, data []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
 		return ErrClosed
 	}
+	if len(data) != PageSize {
+		return fmt.Errorf("emberdb: recovered page %d image is %d bytes, want %d", id, len(data), PageSize)
+	}
 	image := make([]byte, PageSize)
 	copy(image, data)
-	return p.writePageLocked(id, image)
+	p.cache.pin(id, image)
+	return nil
 }
 
 // SetRecoveredState adopts allocator and metadata state read from a commit
@@ -256,10 +262,13 @@ func (p *Pager) SetRecoveredState(st State) {
 	p.hdr.state = st
 }
 
-// Checkpoint makes every page written so far durable and stamps lsn into the
-// header, marking the log up to that point as no longer needed for recovery.
-// It writes the header into the slot the live header did not come from, so a
-// crash during the write leaves the previous header intact.
+// Checkpoint writes every committed page through to the database file, makes
+// it durable, and stamps lsn into the header. After it returns, the log up to
+// lsn is no longer needed for recovery.
+//
+// The header goes into the slot the live header did not come from, so a crash
+// during the write leaves the previous header, and therefore the previous
+// checkpoint, intact.
 func (p *Pager) Checkpoint(lsn uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -270,6 +279,12 @@ func (p *Pager) Checkpoint(lsn uint64) error {
 }
 
 func (p *Pager) checkpointLocked(lsn uint64) error {
+	for _, id := range p.cache.pinnedIDs() {
+		data := p.cache.pinned[id]
+		if _, err := p.file.WriteAt(data, int64(id)*PageSize); err != nil {
+			return fmt.Errorf("emberdb: write page %d: %w", id, err)
+		}
+	}
 	if err := p.sync(); err != nil {
 		return err
 	}
@@ -284,6 +299,7 @@ func (p *Pager) checkpointLocked(lsn uint64) error {
 		return err
 	}
 	p.slot = next
+	p.cache.unpinAll()
 	// Page 0 lives in the cache like any other page; drop it so the next
 	// read picks up the slot that was just written.
 	p.cache.remove(HeaderPage)

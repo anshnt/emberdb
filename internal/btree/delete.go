@@ -17,7 +17,7 @@ func Delete(w WriteStore, root pager.PageID, key []byte) (pager.PageID, bool, er
 	// Merging can leave the root with a single child and no separators. It
 	// is well formed but pointless, so drop the level.
 	for {
-		n, err := writeNode(w, root)
+		n, err := readNode(w, root)
 		if err != nil {
 			return 0, false, err
 		}
@@ -37,8 +37,10 @@ func Delete(w WriteStore, root pager.PageID, key []byte) (pager.PageID, bool, er
 
 // deleteFrom removes key from the subtree rooted at id and reports whether the
 // subtree is now too empty for its parent to leave alone.
+// Like putInto, the descent is read-only: an internal node only changes when
+// the child below it has to be rebalanced.
 func deleteFrom(w WriteStore, id pager.PageID, key []byte) (removed, underfull bool, err error) {
-	n, err := writeNode(w, id)
+	n, err := readNode(w, id)
 	if err != nil {
 		return false, false, err
 	}
@@ -50,14 +52,18 @@ func deleteFrom(w WriteStore, id pager.PageID, key []byte) (removed, underfull b
 		if !exact {
 			return false, false, nil
 		}
-		cells := n.cells()
+		leaf, err := writeNode(w, id)
+		if err != nil {
+			return false, false, err
+		}
+		cells := leaf.cells()
 		if err := freeCellValue(w, cells[idx]); err != nil {
 			return false, false, err
 		}
-		if err := writeCells(n, removeAt(cells, idx)); err != nil {
+		if err := writeCells(leaf, removeAt(cells, idx)); err != nil {
 			return false, false, err
 		}
-		return true, n.usedBytes() < minFill, nil
+		return true, leaf.usedBytes() < minFill, nil
 	}
 
 	ci, err := n.childIndex(key)
@@ -72,12 +78,17 @@ func deleteFrom(w WriteStore, id pager.PageID, key []byte) (removed, underfull b
 	if err != nil || !removed {
 		return removed, false, err
 	}
-	if childUnderfull {
-		if err := rebalance(w, n, ci); err != nil {
-			return false, false, err
-		}
+	if !childUnderfull {
+		return true, n.usedBytes() < minFill, nil
 	}
-	return true, n.usedBytes() < minFill, nil
+	parent, err := writeNode(w, id)
+	if err != nil {
+		return false, false, err
+	}
+	if err := rebalance(w, parent, ci); err != nil {
+		return false, false, err
+	}
+	return true, parent.usedBytes() < minFill, nil
 }
 
 // rebalance repairs a child that has fallen below minFill, by borrowing one

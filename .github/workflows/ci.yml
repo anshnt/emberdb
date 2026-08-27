@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.24"
+  # staticcheck v0.8.1 needs a Go 1.26 toolchain to build.
+  GO_VERSION: "1.26"
   STATICCHECK_VERSION: "v0.8.1"
 
 jobs:
@@ -38,17 +39,20 @@ jobs:
           staticcheck ./...
 
   test:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # 1.23 is the oldest release go.mod claims to support, so it is
+        # tested rather than assumed.
+        go: ["1.23", "1.26"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: ${{ matrix.go }}
           cache: true
       - name: go test
         run: go test -race -count=1 ./...
